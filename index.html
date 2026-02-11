@@ -309,16 +309,22 @@
 
 <script>
 /* ═══════════════════════════════════════
-   조례 비교검색 – GitHub Pages 버전
-   CORS 프록시: corsproxy.io
+   조례 비교검색 – GitHub Pages 테스트 버전
+   다중 CORS 프록시 자동 전환
    ═══════════════════════════════════════ */
 
-const PROXY  = 'https://corsproxy.io/?';
-const SEARCH = 'https://www.law.go.kr/DRF/lawSearch.do';
-const DETAIL = 'https://www.law.go.kr/DRF/lawService.do';
+const SEARCH = 'http://www.law.go.kr/DRF/lawSearch.do';
+const DETAIL = 'http://www.law.go.kr/DRF/lawService.do';
 
-let KW = '';                 // 현재 검색 키워드
-const detailCache = {};      // 본문 캐시
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+let goodProxy = 0;
+
+let KW = '';
+const detailCache = {};
 
 /* ── OC 기억하기 ── */
 (function initOC(){
@@ -347,16 +353,27 @@ function setStatus(r, cls, msg){
   $(`st-${r}`).textContent = msg;
 }
 
-/* ── 프록시 Fetch (XML) ── */
+/* ── 프록시 Fetch — 실패 시 다음 프록시 자동 시도 ── */
 async function apiFetch(baseUrl, params){
   const qs = new URLSearchParams(params).toString();
   const raw = `${baseUrl}?${qs}`;
-  const url = PROXY + encodeURIComponent(raw);
 
-  const res = await fetch(url);
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  return xmlParse(text);
+  let lastErr;
+  for(let i = 0; i < PROXIES.length; i++){
+    const idx = (goodProxy + i) % PROXIES.length;
+    try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 8000);
+      const res = await fetch(PROXIES[idx](raw), { signal: ac.signal });
+      clearTimeout(t);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      if(!text || text.length < 20) throw new Error('빈 응답');
+      goodProxy = idx;
+      return xmlParse(text);
+    } catch(e){ lastErr = e; }
+  }
+  throw new Error(lastErr?.message || '모든 프록시 실패');
 }
 
 /* ── 조례 목록 검색 ── */
@@ -530,9 +547,9 @@ async function doSearch(){
       setStatus(r, items.length?'ok':'', `${label} ${items.length}건`);
     } catch(e){
       console.error(`[${r}]`, e);
-      if(e.message.includes('Failed to fetch') || e.message.includes('NetworkError')){
-        $(`body-${r}`).innerHTML = `<div class="err-box"><p>CORS 프록시 연결 실패<br><span style="font-size:11px;color:var(--text-muted)">corsproxy.io 서비스가 일시적으로 불안정할 수 있습니다.<br>잠시 후 다시 시도해 주세요.</span></p></div>`;
-        errBox.textContent = '⚠ CORS 프록시(corsproxy.io) 연결에 문제가 있습니다. 잠시 후 재시도하거나 Cloudflare Workers 프록시 사용을 권장합니다.';
+      if(e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('프록시')){
+        $(`body-${r}`).innerHTML = `<div class="err-box"><p>프록시 연결 실패<br><span style="font-size:11px;color:var(--text-muted)">무료 프록시가 일시적으로 불안정합니다.<br>잠시 후 다시 시도해 주세요.</span></p></div>`;
+        errBox.textContent = '⚠ CORS 프록시 연결 실패 — 잠시 후 재시도해 주세요.';
         errBox.classList.add('show');
       } else {
         $(`body-${r}`).innerHTML = `<div class="err-box"><p>검색 실패: ${e.message}</p></div>`;
