@@ -348,10 +348,13 @@ async function apiFetch(baseUrl, params){
 /* ── 조례 목록 검색 ── */
 async function fetchList(keyword, region){
   const org = region === 'gj' ? '광주광역시' : '전라남도';
-  return apiFetch(SEARCH, {
+  const xml = await apiFetch(SEARCH, {
     OC, target:'ordin', type:'XML',
     query: keyword, display:'20', org
   });
+  // 디버그: 실제 응답 확인
+  console.log(`[${region}] XML 응답:`, xml.documentElement?.outerHTML?.substring(0, 1000));
+  return xml;
 }
 
 /* ── 조례 본문 조회 ── */
@@ -382,32 +385,77 @@ function parseArticles(xml){
 /* ── 목록 XML → items ── */
 function parseList(xml){
   const items = [];
-  // 다양한 XML 구조에 대응
-  const candidates = ['ordin','자치법규','law'];
+  const root = xml.documentElement;
+  if(!root) { console.warn('parseList: no root element'); return items; }
+
+  console.log('parseList root tag:', root.tagName);
+  console.log('parseList children:', [...root.children].map(c => c.tagName));
+
+  // 1단계: 알려진 태그명으로 시도
+  const knownTags = ['ordin','자치법규','law','ordinInfo','LawSearch','OrdinSearch'];
   let nodes = null;
-  for(const tag of candidates){
-    const found = xml.querySelectorAll(tag);
-    if(found.length){ nodes = found; break; }
+  for(const tag of knownTags){
+    const found = root.querySelectorAll(tag);
+    if(found.length){ nodes = found; console.log(`parseList: found ${found.length} <${tag}>`); break; }
   }
-  // fallback: totalCnt 외 자식 탐색
+
+  // 2단계: 못 찾으면, totalCnt/page 등 메타 제외한 자식 중 반복되는 태그 찾기
   if(!nodes || !nodes.length){
-    const root = xml.documentElement;
-    if(root){
-      for(const child of root.children){
-        if(['totalCnt','page','resultCnt'].includes(child.tagName)) continue;
-        const nm = child.querySelector('자치법규명,법규명,ordinName,법령명칭');
-        if(nm){ nodes = xml.querySelectorAll(child.tagName); break; }
+    const skip = ['totalCnt','page','numOfRows','resultCnt','resultCode','resultMsg','target','키워드','section'];
+    for(const child of root.children){
+      if(skip.includes(child.tagName)) continue;
+      // 이 태그 안에 이름 관련 필드가 있는지 확인
+      const hasName = child.querySelector('자치법규명') || child.querySelector('법규명') || 
+                      child.querySelector('ordinName') || child.querySelector('법령명칭') ||
+                      child.querySelector('자치법규명한글');
+      if(hasName){
+        nodes = root.querySelectorAll(child.tagName);
+        console.log(`parseList fallback: found ${nodes.length} <${child.tagName}>`);
+        break;
       }
     }
   }
-  if(!nodes) return items;
+
+  // 3단계: 그래도 못 찾으면, 아무 반복 자식이나 시도
+  if(!nodes || !nodes.length){
+    const skip = ['totalCnt','page','numOfRows','resultCnt','resultCode','resultMsg','target','키워드','section'];
+    const candidates = [...root.children].filter(c => !skip.includes(c.tagName));
+    if(candidates.length > 0){
+      const tag = candidates[0].tagName;
+      nodes = root.querySelectorAll(tag);
+      console.log(`parseList last resort: found ${nodes.length} <${tag}>`);
+      // 첫 번째 노드의 자식 태그명 출력
+      console.log('  자식 태그들:', [...candidates[0].children].map(c => c.tagName));
+    }
+  }
+
+  if(!nodes || !nodes.length) { console.warn('parseList: no items found'); return items; }
 
   nodes.forEach(n => {
-    const name = (n.querySelector('자치법규명')||n.querySelector('법규명')||n.querySelector('ordinName')||n.querySelector('법령명칭'))?.textContent || '';
-    const id   = (n.querySelector('자치법규ID')||n.querySelector('자치법규일련번호')||n.querySelector('ordinId')||n.querySelector('법규ID'))?.textContent || '';
-    const type = (n.querySelector('자치법규종류')||n.querySelector('법규종류'))?.textContent || '조례';
+    // 이름 찾기: 여러 가능한 태그명 시도
+    const name = (
+      n.querySelector('자치법규명') || n.querySelector('자치법규명한글') ||
+      n.querySelector('법규명') || n.querySelector('ordinName') || 
+      n.querySelector('법령명칭') || n.querySelector('법령명한글')
+    )?.textContent || '';
+
+    // ID 찾기
+    const id = (
+      n.querySelector('자치법규ID') || n.querySelector('자치법규일련번호') ||
+      n.querySelector('ordinId') || n.querySelector('법규ID') || 
+      n.querySelector('자치법규서비스ID')
+    )?.textContent || '';
+
+    // 종류 찾기
+    const type = (
+      n.querySelector('자치법규종류') || n.querySelector('법규종류') || 
+      n.querySelector('자치법규분류')
+    )?.textContent || '조례';
+
     if(name) items.push({name, id, type});
   });
+
+  console.log(`parseList 결과: ${items.length}건`, items.slice(0,2));
   return items;
 }
 
