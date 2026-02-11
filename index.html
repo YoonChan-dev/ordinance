@@ -252,11 +252,6 @@
   </header>
 
   <section class="search-section">
-    <div class="oc-row">
-      <label for="oc">OC 인증키</label>
-      <input type="password" id="oc" class="oc-input" placeholder="법제처 공동활용 OC값 입력">
-      <label class="oc-save"><input type="checkbox" id="oc-remember"> 기억하기</label>
-    </div>
     <div class="search-box">
       <div class="search-input-wrap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -302,41 +297,58 @@
   </main>
 
   <footer class="footer">
-    데이터 출처: <a href="https://open.law.go.kr" target="_blank">법제처 국가법령정보 공동활용</a> &nbsp;|&nbsp;
-    OC 인증키는 <a href="https://open.law.go.kr/LSO/openApi/guideList.do" target="_blank">여기서</a> 발급받으세요
+    데이터 출처: <a href="https://open.law.go.kr" target="_blank">법제처 국가법령정보 공동활용</a>
   </footer>
 </div>
 
 <script>
 /* ═══════════════════════════════════════
-   조례 비교검색 – GitHub Pages 테스트 버전
-   다중 CORS 프록시 자동 전환
+   조례 비교검색 – GitHub Pages 버전
    ═══════════════════════════════════════ */
 
+const OC     = 'kyungsamko';
 const SEARCH = 'http://www.law.go.kr/DRF/lawSearch.do';
 const DETAIL = 'http://www.law.go.kr/DRF/lawService.do';
 
 const PROXIES = [
-  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  {
+    name: 'allorigins(json)',
+    fetch: async (url, signal) => {
+      const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, {signal});
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      return j.contents;
+    }
+  },
+  {
+    name: 'allorigins(raw)',
+    fetch: async (url, signal) => {
+      const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {signal});
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.text();
+    }
+  },
+  {
+    name: 'corsproxy.io',
+    fetch: async (url, signal) => {
+      const r = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`, {signal});
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.text();
+    }
+  },
+  {
+    name: 'thingproxy',
+    fetch: async (url, signal) => {
+      const r = await fetch(`https://thingproxy.freeboard.io/fetch/${url}`, {signal});
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.text();
+    }
+  },
 ];
 let goodProxy = 0;
 
 let KW = '';
 const detailCache = {};
-
-/* ── OC 기억하기 ── */
-(function initOC(){
-  const saved = localStorage.getItem('_oc');
-  if(saved){
-    document.getElementById('oc').value = saved;
-    document.getElementById('oc-remember').checked = true;
-  }
-})();
-document.getElementById('oc-remember').addEventListener('change', e => {
-  if(!e.target.checked) localStorage.removeItem('_oc');
-});
 
 /* ── 유틸 ── */
 const $ = id => document.getElementById(id);
@@ -361,35 +373,38 @@ async function apiFetch(baseUrl, params){
   let lastErr;
   for(let i = 0; i < PROXIES.length; i++){
     const idx = (goodProxy + i) % PROXIES.length;
+    const proxy = PROXIES[idx];
     try {
       const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 8000);
-      const res = await fetch(PROXIES[idx](raw), { signal: ac.signal });
+      const t = setTimeout(() => ac.abort(), 10000);
+      const text = await proxy.fetch(raw, ac.signal);
       clearTimeout(t);
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
       if(!text || text.length < 20) throw new Error('빈 응답');
       goodProxy = idx;
+      console.log(`✓ ${proxy.name} 성공`);
       return xmlParse(text);
-    } catch(e){ lastErr = e; }
+    } catch(e){
+      console.warn(`✗ ${proxy.name}: ${e.message}`);
+      lastErr = e;
+    }
   }
-  throw new Error(lastErr?.message || '모든 프록시 실패');
+  throw new Error(`모든 프록시 실패 — ${lastErr?.message || '알 수 없음'}`);
 }
 
 /* ── 조례 목록 검색 ── */
-async function fetchList(oc, keyword, region){
+async function fetchList(keyword, region){
   const org = region === 'gj' ? '광주광역시' : '전라남도';
   return apiFetch(SEARCH, {
-    OC: oc, target:'ordin', type:'XML',
+    OC, target:'ordin', type:'XML',
     query: keyword, display:'20', org
   });
 }
 
 /* ── 조례 본문 조회 ── */
-async function fetchDetail(oc, id){
+async function fetchDetail(id){
   if(detailCache[id]) return detailCache[id];
   const xml = await apiFetch(DETAIL, {
-    OC: oc, target:'ordin', type:'XML', ID: id
+    OC, target:'ordin', type:'XML', ID: id
   });
   detailCache[id] = xml;
   return xml;
@@ -454,13 +469,10 @@ async function toggleCard(region, idx, ordinId){
   card.classList.add('open');
   if(body.dataset.loaded === '1') return;
 
-  const oc = $('oc').value.trim();
-  if(!oc){ body.innerHTML='<div class="err-box"><p>OC 인증키를 입력해주세요.</p></div>'; return; }
-
   body.innerHTML = `<div class="loading-box" style="padding:18px"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div><div class="loading-text" style="font-size:11.5px">본문 불러오는 중…</div></div>`;
 
   try {
-    const xml = await fetchDetail(oc, ordinId);
+    const xml = await fetchDetail(ordinId);
     const arts = parseArticles(xml);
 
     if(arts.length){
@@ -509,22 +521,14 @@ function render(region, items){
 
 /* ── 메인 검색 ── */
 async function doSearch(){
-  const oc = $('oc').value.trim();
   const keyword = $('keyword').value.trim();
   const errBox = $('err-notice');
   errBox.classList.remove('show');
 
-  if(!oc){
-    alert('OC 인증키를 입력해주세요.\nopen.law.go.kr에서 발급받을 수 있습니다.');
-    $('oc').focus(); return;
-  }
   if(!keyword){
     alert('검색 키워드를 입력해주세요.');
     $('keyword').focus(); return;
   }
-
-  // OC 기억
-  if($('oc-remember').checked) localStorage.setItem('_oc', oc);
 
   KW = keyword;
   $('btn').disabled = true;
@@ -538,7 +542,7 @@ async function doSearch(){
   const search = async r => {
     const label = r==='gj'?'광주광역시':'전라남도';
     try {
-      const xml = await fetchList(oc, keyword, r);
+      const xml = await fetchList(keyword, r);
       const err = xml.querySelector('error,Error');
       if(err) throw new Error(err.textContent||'API 오류');
 
@@ -547,9 +551,9 @@ async function doSearch(){
       setStatus(r, items.length?'ok':'', `${label} ${items.length}건`);
     } catch(e){
       console.error(`[${r}]`, e);
-      if(e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('프록시')){
-        $(`body-${r}`).innerHTML = `<div class="err-box"><p>프록시 연결 실패<br><span style="font-size:11px;color:var(--text-muted)">무료 프록시가 일시적으로 불안정합니다.<br>잠시 후 다시 시도해 주세요.</span></p></div>`;
-        errBox.textContent = '⚠ CORS 프록시 연결 실패 — 잠시 후 재시도해 주세요.';
+      if(e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('모든 프록시')){
+        $(`body-${r}`).innerHTML = `<div class="err-box"><p>프록시 연결 실패<br><span style="font-size:11px;color:var(--text-muted)">${e.message}<br>F12 콘솔에서 상세 로그를 확인하세요.</span></p></div>`;
+        errBox.textContent = '⚠ 프록시 연결 실패 — 잠시 후 재시도해 주세요.';
         errBox.classList.add('show');
       } else {
         $(`body-${r}`).innerHTML = `<div class="err-box"><p>검색 실패: ${e.message}</p></div>`;
@@ -565,7 +569,6 @@ async function doSearch(){
 
 /* ── 단축키 ── */
 $('keyword').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
-$('oc').addEventListener('keydown', e => { if(e.key==='Enter') $('keyword').focus(); });
 </script>
 </body>
 </html>
