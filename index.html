@@ -3,14 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Regulation Search</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        input { margin: 10px 0; padding: 10px; width: 300px; }
+        button { padding: 10px; }
+        .results { margin-top: 20px; }
+        .result-item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+    </style>
 </head>
 <body>
+    <h1>Search Regulations</h1>
+    <input type="text" id="searchInput" placeholder="Enter search term..." />
+    <button id="searchBtn">Search</button>
+    <div class="results" id="results"></div>
     <script>
-        // CORS proxy replaced with allorigins.win
-        const proxyUrl = 'https://api.allorigins.win/get?url=';
-        // Default OC value set to kyungsamko
         const defaultOC = 'kyungsamko';
+        const corsProxyUrl = 'https://api.allorigins.win/get?url=';
+
+        document.getElementById('searchBtn').addEventListener('click', () => {
+            const searchTerm = document.getElementById('searchInput').value;
+            const apiUrl = `https://example.com/api/search?query=${searchTerm}&oc=${defaultOC}`;  // Replace with actual API url
+            fetch(corsProxyUrl + encodeURIComponent(apiUrl))
+                .then(response => response.json())
+                .then(data => {
+                    const resultsDiv = document.getElementById('results');
+                    resultsDiv.innerHTML = '';
+                    data.results.forEach(result => {
+                        const item = document.createElement('div');
+                        item.classList.add('result-item');
+                        item.innerHTML = `<h2>${result.title}</h2><p>${result.description}</p>`;
+                        resultsDiv.appendChild(item);
+                    });
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        });
     </script>
 </body>
 </html>
