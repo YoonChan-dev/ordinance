@@ -625,15 +625,14 @@
   ════════════════════════════════ */
   const PROXY_URL  = '/api/proxy';
   const OC         = 'kyungsamko';
-  const API_SEARCH = 'https://www.law.go.kr/DRF/lawSearch.do';
+  const DATA_URL   = '/data/ordinances.json';
   const API_DETAIL = 'https://www.law.go.kr/DRF/lawService.do';
-  const MAX_PAGES  = 10;
-  const PER_PAGE   = 100;
 
   /* ════════════════════════════════
      State
   ════════════════════════════════ */
   let currentKeyword = '';
+  let allData        = null;   // { updated, gj: [...], jn: [...] }
   const detailCache  = new Map();
 
   /* ════════════════════════════════
@@ -654,13 +653,6 @@
     return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
   }
 
-  function cleanName(raw) {
-    return (raw || '')
-      .replace(/\s+/g, ' ')
-      .replace(/^\d+[\.\)\-\s]+/, '')
-      .trim();
-  }
-
   /* ════════════════════════════════
      Status bar
   ════════════════════════════════ */
@@ -670,7 +662,18 @@
   }
 
   /* ════════════════════════════════
-     API
+     Data loading (static JSON)
+  ════════════════════════════════ */
+  async function loadData() {
+    if (allData) return allData;
+    const res = await fetch(DATA_URL);
+    if (!res.ok) throw new Error(`데이터 로드 실패: HTTP ${res.status}`);
+    allData = await res.json();
+    return allData;
+  }
+
+  /* ════════════════════════════════
+     API (detail only, via proxy)
   ════════════════════════════════ */
   async function apiFetch(baseUrl, params) {
     const qs  = new URLSearchParams(params).toString();
@@ -739,14 +742,11 @@
       </div>`;
   }
 
-  function htmlLoading(page, gjCount, jnCount) {
+  function htmlLoading(message) {
     return `
       <div class="state-loading">
         <div class="spinner"></div>
-        <div class="loading-text">
-          페이지 ${page} 검색 중…<br>
-          <span style="font-size:11.5px">광주 ${gjCount}건 · 전남 ${jnCount}건 발견</span>
-        </div>
+        <div class="loading-text">${message}</div>
       </div>`;
   }
 
@@ -824,7 +824,7 @@
   }
 
   /* ════════════════════════════════
-     Search
+     Search (local JSON filtering)
   ════════════════════════════════ */
   async function doSearch() {
     const keyword = $('keyword').value.trim();
@@ -832,7 +832,6 @@
     const btn     = $('search-btn');
     const input   = $('keyword');
 
-    /* Validate */
     hint.className   = 'search-hint';
     hint.textContent = '';
     input.classList.remove('invalid');
@@ -845,93 +844,40 @@
       return;
     }
 
-    /* Setup */
     currentKeyword  = keyword;
     btn.disabled    = true;
     btn.textContent = '검색 중…';
 
-    const gjItems = [];
-    const jnItems = [];
-
-    setStatus('gj', 'loading', '광주광역시 검색 중…');
-    setStatus('jn', 'loading', '전라남도 검색 중…');
-
     for (const r of ['gj', 'jn']) {
-      $(`body-${r}`).innerHTML = htmlLoading(1, 0, 0);
+      $(`body-${r}`).innerHTML = htmlLoading('데이터 불러오는 중…');
       $(`count-${r}`).textContent = '-';
       $(`count-${r}`).classList.remove('filled');
     }
+    setStatus('gj', 'loading', '광주광역시 검색 중…');
+    setStatus('jn', 'loading', '전라남도 검색 중…');
 
-    /* Fetch pages */
     try {
-      let totalCount = 0;
-      let fetched    = 0;
+      const data  = await loadData();
+      const lower = keyword.toLowerCase();
+      const match = item => item.name.toLowerCase().includes(lower);
 
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        /* Update progress */
-        for (const r of ['gj', 'jn']) {
-          $(`body-${r}`).innerHTML = htmlLoading(page, gjItems.length, jnItems.length);
-        }
+      const gjResults = data.gj.filter(match);
+      const jnResults = data.jn.filter(match);
 
-        const xml = await apiFetch(API_SEARCH, {
-          OC,
-          target:  'ordin',
-          type:    'XML',
-          query:   keyword,
-          display: String(PER_PAGE),
-          page:    String(page),
-        });
+      renderResults('gj', gjResults);
+      renderResults('jn', jnResults);
+      setStatus('gj', gjResults.length ? 'ok' : '', `광주광역시 ${gjResults.length}건`);
+      setStatus('jn', jnResults.length ? 'ok' : '', `전라남도 ${jnResults.length}건`);
 
-        const errorNode = xml.querySelector('error, Error');
-        if (errorNode) throw new Error(errorNode.textContent || 'API 오류');
-
-        if (page === 1) {
-          totalCount = parseInt(xml.querySelector('totalCnt')?.textContent || '0', 10);
-          if (totalCount === 0) break;
-        }
-
-        const laws = xml.querySelectorAll('law');
-        laws.forEach(node => {
-          const org  = node.querySelector('지자체기관명')?.textContent?.trim() || '';
-          const name = cleanName(node.querySelector('자치법규명')?.textContent || '');
-          const id   = node.querySelector('자치법규ID')?.textContent?.trim() || '';
-          const mst  = node.querySelector('자치법규일련번호')?.textContent?.trim() || '';
-          const type = node.querySelector('자치법규종류')?.textContent?.trim() || '조례';
-          if (!name) return;
-
-          const item = { name, id, mst, type, org };
-          if      (org.includes('광주광역시')) gjItems.push(item);
-          else if (org.includes('전라남도'))   jnItems.push(item);
-        });
-
-        fetched += laws.length;
-        if (fetched >= totalCount) break;
+      if (data.updated) {
+        hint.className   = 'search-hint';
+        hint.textContent = `데이터 기준: ${data.updated}`;
       }
-
-      renderResults('gj', gjItems);
-      renderResults('jn', jnItems);
-      setStatus('gj', gjItems.length ? 'ok' : '', `광주광역시 ${gjItems.length}건`);
-      setStatus('jn', jnItems.length ? 'ok' : '', `전라남도 ${jnItems.length}건`);
-
     } catch (err) {
       console.error(err);
-
-      const isNetworkError = /Failed to fetch|NetworkError|시간 초과/i.test(err.message);
-
       for (const r of ['gj', 'jn']) {
-        const items = r === 'gj' ? gjItems : jnItems;
-        const label = r === 'gj' ? '광주광역시' : '전라남도';
-
-        if (items.length) {
-          renderResults(r, items);
-          setStatus(r, 'ok', `${label} ${items.length}건 (일부)`);
-        } else {
-          const msg = isNetworkError
-            ? `프록시 연결 실패 — ${err.message}`
-            : `검색 실패: ${err.message}`;
-          $(`body-${r}`).innerHTML = `<div class="state-error">${msg}</div>`;
-          setStatus(r, 'error', `${label} 오류`);
-        }
+        $(`body-${r}`).innerHTML = `<div class="state-error">오류: ${err.message}</div>`;
+        setStatus(r, 'error', r === 'gj' ? '광주광역시 오류' : '전라남도 오류');
       }
     }
 
@@ -940,11 +886,14 @@
   }
 
   /* ════════════════════════════════
-     Keyboard
+     Keyboard & init
   ════════════════════════════════ */
   $('keyword').addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
   });
+
+  // 백그라운드에서 데이터 미리 로드 (첫 검색 속도 향상)
+  loadData().catch(() => {});
 </script>
 </body>
 </html>
