@@ -716,13 +716,20 @@
   function parseArticles(xml) {
     const articles = [];
 
-    for (const selector of ['조문단위', '조문']) {
-      xml.querySelectorAll(selector).forEach(node => {
-        const title   = node.querySelector('조문제목')?.textContent || '';
-        const content = node.querySelector('조문내용')?.textContent || '';
+    // 법제처 자치법규 XML: <조문> → <조> → <조제목>, <조내용>
+    xml.querySelectorAll('조').forEach(node => {
+      const title   = node.querySelector('조제목')?.textContent?.trim() || '';
+      const content = node.querySelector('조내용')?.textContent?.trim() || '';
+      if (content) articles.push({ title, content });
+    });
+
+    // 일부 조례 구형 구조 fallback
+    if (!articles.length) {
+      xml.querySelectorAll('조문단위').forEach(node => {
+        const title   = node.querySelector('조문제목')?.textContent?.trim() || '';
+        const content = node.querySelector('조문내용')?.textContent?.trim() || '';
         if (content) articles.push({ title, content });
       });
-      if (articles.length) break;
     }
 
     return articles;
@@ -804,18 +811,10 @@
             <div class="article-body">${highlight(a.content, currentKeyword)}</div>
           </div>`).join('');
       } else {
-        const rawText = xml.documentElement?.textContent?.trim() || '';
-        if (rawText.length > 30) {
-          body.innerHTML = `
-            <div class="article">
-              <div class="article-body">${highlight(rawText.substring(0, 5000), currentKeyword)}</div>
-            </div>`;
-        } else {
-          body.innerHTML = `
-            <div style="padding: 10px 0; font-size: 12px; color: var(--text-muted)">
-              본문 내용을 가져올 수 없습니다.
-            </div>`;
-        }
+        body.innerHTML = `
+          <div style="padding: 10px 0; font-size: 12px; color: var(--text-muted)">
+            본문 내용을 불러올 수 없습니다.
+          </div>`;
       }
       body.dataset.loaded = '1';
     } catch (err) {
