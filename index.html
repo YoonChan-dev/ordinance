@@ -73,7 +73,8 @@
     .app {
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
     }
 
     /* ════════════════════════════════
@@ -520,10 +521,11 @@
     ════════════════════════════════ */
     .content {
       flex: 1;
+      min-height: 0;       /* flex 자식이 콘텐츠 높이로 무한 팽창하지 않도록 */
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
-      padding: 16px 16px 40px;
+      padding: 16px;
     }
 
     /* ── Panel ── */
@@ -535,6 +537,7 @@
       display: flex;
       flex-direction: column;
       box-shadow: var(--shadow-sm);
+      min-height: 0;       /* 그리드 셀 안에서 높이 제한이 작동하도록 */
     }
 
     .panel-header {
@@ -794,8 +797,11 @@
       .header h1      { font-size: 22px; }
       .search-bar     { padding: 14px 16px; }
       .status-bar     { padding: 8px 16px; gap: 16px; }
-      .content        { grid-template-columns: 1fr; padding: 12px 12px 32px; }
+      .content        { grid-template-columns: 1fr; padding: 12px; }
       .search-row     { flex-direction: column; }
+      .app            { height: auto; overflow: visible; }
+      .content        { min-height: 0; }
+      .panel          { min-height: 400px; }
     }
   </style>
 </head>
