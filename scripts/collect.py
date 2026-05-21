@@ -18,31 +18,33 @@ from xml.etree import ElementTree as ET
 import requests
 
 # ── 설정 ──────────────────────────────────────────
-OC       = 'kyungsamko'
-API_URL  = 'https://www.law.go.kr/DRF/lawSearch.do'
-PER_PAGE = 100
-DELAY    = 0.4   # 요청 간 대기 (초) — API 서버 부하 방지
-OUTPUT   = Path(__file__).parent.parent / 'data' / 'ordinances.json'
+OC          = 'kyungsamko'
+API_URL     = 'https://www.law.go.kr/DRF/lawSearch.do'
+PER_PAGE    = 100
+DELAY       = 1.0   # 요청 간 대기 (초) — 서버 부하 및 rate limit 방지
+MAX_RETRIES = 3     # 페이지 실패 시 재시도 횟수
+OUTPUT      = Path(__file__).parent.parent / 'data' / 'ordinances.json'
 
-# 광주: 구별 + 본청 개별 검색 (단일 쿼리는 API 결과 상한에 걸림)
+# 광주: '광주광역시' 먼저 실행(seen 비어 있을 때 최대 수집) → 구별 쿼리로 누락분 보완
 GJ_QUERIES = [
+    '광주광역시',        # 본청 + 전 구 포함 (가장 광범위, 첫 번째 실행)
     '광주광역시 동구',
     '광주광역시 서구',
     '광주광역시 남구',
     '광주광역시 북구',
     '광주광역시 광산구',
     '광주광역시교육청',
-    '광주광역시',        # 본청 (구 이름 없는 조례 포함), seen으로 중복 제거
 ]
 
-# 전남: 도청 본청 + 22개 시군 개별 검색
+# 전남: '전라남도 XX' 형태로 통일 (단순 시군명은 API 결과가 100건으로 잘림)
 JN_QUERIES = [
     '전라남도',
-    '목포시', '여수시', '순천시', '나주시', '광양시',
-    '담양군', '곡성군', '구례군', '고흥군', '보성군',
-    '화순군', '장흥군', '강진군', '해남군', '영암군',
-    '무안군', '함평군', '영광군', '장성군', '완도군',
-    '진도군', '신안군',
+    '전라남도 목포시', '전라남도 여수시', '전라남도 순천시', '전라남도 나주시', '전라남도 광양시',
+    '전라남도 담양군', '전라남도 곡성군', '전라남도 구례군', '전라남도 고흥군', '전라남도 보성군',
+    '전라남도 화순군', '전라남도 장흥군', '전라남도 강진군', '전라남도 해남군', '전라남도 영암군',
+    '전라남도 무안군', '전라남도 함평군', '전라남도 영광군', '전라남도 장성군', '전라남도 완도군',
+    '전라남도 진도군', '전라남도 신안군',
+    '전라남도교육청',
 ]
 # ──────────────────────────────────────────────────
 
@@ -55,9 +57,22 @@ def fetch_page(query: str, page: int) -> ET.Element:
         'query':   query,
         'display': PER_PAGE,
         'page':    page,
-    }, timeout=15)
+    }, timeout=20)
     resp.raise_for_status()
     return ET.fromstring(resp.content)
+
+
+def fetch_page_with_retry(query: str, page: int) -> ET.Element | None:
+    for attempt in range(MAX_RETRIES):
+        try:
+            return fetch_page(query, page)
+        except Exception as e:
+            if attempt < MAX_RETRIES - 1:
+                print(f'\n  [{query}] p{page} 오류 (재시도 {attempt+1}/{MAX_RETRIES-1}): {e}', flush=True)
+                time.sleep(2)
+            else:
+                print(f'\n  [{query}] p{page} 오류 ({MAX_RETRIES}회 모두 실패): {e}', flush=True)
+    return None
 
 
 def clean_name(raw: str) -> str:
@@ -73,10 +88,8 @@ def collect(queries: list, region_filter, label: str) -> list:
         total = None
 
         while True:
-            try:
-                xml = fetch_page(query, page)
-            except Exception as e:
-                print(f'\n  [{query}] p{page} 오류: {e}', flush=True)
+            xml = fetch_page_with_retry(query, page)
+            if xml is None:
                 break
 
             if page == 1:
