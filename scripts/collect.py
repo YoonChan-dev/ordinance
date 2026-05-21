@@ -92,11 +92,14 @@ def collect(queries: list, region_filter, label: str) -> list:
 
                 seen.add(mst)
                 items.append({
-                    'name': name,
-                    'id':   (law.findtext('자치법규ID') or '').strip(),
-                    'mst':  mst,
-                    'type': (law.findtext('자치법규종류') or '조례').strip(),
-                    'org':  org,
+                    'name':  name,
+                    'id':    (law.findtext('자치법규ID')    or '').strip(),
+                    'mst':   mst,
+                    'type':  (law.findtext('자치법규종류')  or '조례').strip(),
+                    'org':   org,
+                    'prom':  (law.findtext('공포일자')      or '').strip(),  # YYYYMMDD
+                    'dept':  (law.findtext('소관부서명')    or '').strip(),
+                    'amend': (law.findtext('제개정구분명')  or '').strip(),
                 })
 
             if page * PER_PAGE >= total:

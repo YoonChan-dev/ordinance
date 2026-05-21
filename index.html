@@ -570,6 +570,32 @@
 
     .card.open .card-body { display: block; }
 
+    /* ── Card meta row ── */
+    .card-meta {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      padding: 0 13px 9px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .card-meta-sep { color: var(--border-strong); }
+
+    .card-amend {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: #f1f5f9;
+      color: var(--text-secondary);
+    }
+
+    .card-amend.폐지       { background: #fee2e2; color: var(--danger); }
+    .card-amend.전부개정   { background: #fff7ed; color: var(--warning); }
+
     /* ── Articles (card content) ── */
     .article {
       padding: 9px 0;
@@ -912,6 +938,25 @@
     return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
   }
 
+  function fmtDate(d) {
+    if (!d || d.length < 8) return '';
+    return `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
+  }
+
+  function cardMeta(item) {
+    const info = [
+      item.dept || '',
+      item.prom ? `개정 ${fmtDate(item.prom)}` : '',
+    ].filter(Boolean).join(' · ');
+
+    const amend = (item.amend && item.amend !== '제정')
+      ? `<span class="card-amend ${item.amend}">${item.amend}</span>`
+      : '';
+
+    if (!info && !amend) return '';
+    return `<div class="card-meta">${info ? `<span>${info}</span>` : ''}${amend}</div>`;
+  }
+
   function highlightBody(text, kw) {
     if (!kw || !text) return text || '';
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1049,6 +1094,7 @@
           <div class="card-name">${highlight(item.name, currentKeyword)}</div>
           <span class="card-badge">${item.type || '조례'}</span>
         </div>
+        ${cardMeta(item)}
         <div class="card-body" id="card-body-${region}-${i}"></div>
       </div>`).join('');
   }
