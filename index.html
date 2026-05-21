@@ -228,6 +228,77 @@
     .search-hint.error { color: var(--danger); }
 
     /* ════════════════════════════════
+       Filter bar
+    ════════════════════════════════ */
+    .filter-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .filter-select-wrap {
+      flex: 1;
+      position: relative;
+    }
+
+    .filter-select-wrap::after {
+      content: '';
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--text-muted);
+      pointer-events: none;
+    }
+
+    .filter-select {
+      width: 100%;
+      padding: 6px 28px 6px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--r-sm);
+      background: var(--bg-surface);
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text-primary);
+      appearance: none;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+
+    .filter-select:focus { outline: none; }
+    .filter-select.gj:focus { border-color: var(--gj); }
+    .filter-select.jn:focus { border-color: var(--jn); }
+
+    .filter-select.gj:not([value=""]) { border-color: var(--gj); color: var(--gj); }
+    .filter-select.jn:not([value=""]) { border-color: var(--jn); color: var(--jn); }
+
+    @media (max-width: 860px) {
+      .filter-bar { grid-template-columns: 1fr; padding: 8px 12px; gap: 8px; }
+      .filter-label { min-width: 80px; }
+    }
+
+    /* ════════════════════════════════
        Status bar
     ════════════════════════════════ */
     .status-bar {
@@ -557,6 +628,57 @@
     </div>
   </div>
 
+  <!-- ── Filter ── -->
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-label">광주광역시</span>
+      <div class="filter-select-wrap">
+        <select id="filter-gj" class="filter-select gj" onchange="applyFilter()">
+          <option value="">전체</option>
+          <option value="광주광역시">광주광역시 (본청)</option>
+          <option value="광주광역시 동구">동구</option>
+          <option value="광주광역시 서구">서구</option>
+          <option value="광주광역시 남구">남구</option>
+          <option value="광주광역시 북구">북구</option>
+          <option value="광주광역시 광산구">광산구</option>
+          <option value="광주광역시교육청">교육청</option>
+        </select>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">전라남도</span>
+      <div class="filter-select-wrap">
+        <select id="filter-jn" class="filter-select jn" onchange="applyFilter()">
+          <option value="">전체</option>
+          <option value="전라남도">전라남도 (본청)</option>
+          <option value="전라남도 목포시">목포시</option>
+          <option value="전라남도 여수시">여수시</option>
+          <option value="전라남도 순천시">순천시</option>
+          <option value="전라남도 나주시">나주시</option>
+          <option value="전라남도 광양시">광양시</option>
+          <option value="전라남도 담양군">담양군</option>
+          <option value="전라남도 곡성군">곡성군</option>
+          <option value="전라남도 구례군">구례군</option>
+          <option value="전라남도 고흥군">고흥군</option>
+          <option value="전라남도 보성군">보성군</option>
+          <option value="전라남도 화순군">화순군</option>
+          <option value="전라남도 장흥군">장흥군</option>
+          <option value="전라남도 강진군">강진군</option>
+          <option value="전라남도 해남군">해남군</option>
+          <option value="전라남도 영암군">영암군</option>
+          <option value="전라남도 무안군">무안군</option>
+          <option value="전라남도 함평군">함평군</option>
+          <option value="전라남도 영광군">영광군</option>
+          <option value="전라남도 장성군">장성군</option>
+          <option value="전라남도 완도군">완도군</option>
+          <option value="전라남도 진도군">진도군</option>
+          <option value="전라남도 신안군">신안군</option>
+          <option value="전라남도교육청">교육청</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Status ── -->
   <div class="status-bar">
     <div class="status-item">
@@ -865,16 +987,7 @@
 
     try {
       const data  = await loadData();
-      const lower = keyword.toLowerCase();
-      const match = item => item.name.toLowerCase().includes(lower);
-
-      const gjResults = data.gj.filter(match);
-      const jnResults = data.jn.filter(match);
-
-      renderResults('gj', gjResults);
-      renderResults('jn', jnResults);
-      setStatus('gj', gjResults.length ? 'ok' : '', `광주광역시 ${gjResults.length}건`);
-      setStatus('jn', jnResults.length ? 'ok' : '', `전라남도 ${jnResults.length}건`);
+      applyFilterWith(data, keyword);
 
       if (data.updated) {
         hint.className   = 'search-hint';
@@ -890,6 +1003,32 @@
 
     btn.disabled    = false;
     btn.textContent = '검색';
+  }
+
+  /* ════════════════════════════════
+     Filter
+  ════════════════════════════════ */
+  function applyFilterWith(data, keyword) {
+    const lower   = keyword.toLowerCase();
+    const gjOrg   = $('filter-gj').value;
+    const jnOrg   = $('filter-jn').value;
+
+    const match = (item, orgFilter) =>
+      item.name.toLowerCase().includes(lower) &&
+      (!orgFilter || item.org === orgFilter);
+
+    const gjResults = data.gj.filter(item => match(item, gjOrg));
+    const jnResults = data.jn.filter(item => match(item, jnOrg));
+
+    renderResults('gj', gjResults);
+    renderResults('jn', jnResults);
+    setStatus('gj', gjResults.length ? 'ok' : '', `광주광역시 ${gjResults.length}건`);
+    setStatus('jn', jnResults.length ? 'ok' : '', `전라남도 ${jnResults.length}건`);
+  }
+
+  function applyFilter() {
+    if (!currentKeyword || !allData) return;
+    applyFilterWith(allData, currentKeyword);
   }
 
   /* ════════════════════════════════
