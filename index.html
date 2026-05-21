@@ -494,6 +494,27 @@
       50%       { opacity: .3; }
     }
 
+    /* ── Scroll sync toggle ── */
+    .sync-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: 99px;
+      background: var(--bg-surface);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+
+    .sync-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
+    .sync-btn:hover { border-color: var(--gj); color: var(--gj); }
+    .sync-btn.on { border-color: var(--gj); color: var(--gj); background: var(--gj-light); }
+
     /* ════════════════════════════════
        Main content — two panels
     ════════════════════════════════ */
@@ -897,6 +918,15 @@
       <div class="status-dot" id="dot-jn"></div>
       <span id="label-jn">전라남도 대기중</span>
     </div>
+    <button id="sync-btn" class="sync-btn" onclick="toggleScrollSync()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3"/>
+        <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/>
+        <path d="M12 20v-8"/><path d="m9 15 3 5 3-5"/>
+      </svg>
+      스크롤 동기화
+    </button>
   </div>
 
   <!-- ── Panels ── -->
@@ -1574,6 +1604,34 @@
   $('body-keyword').addEventListener('keydown', e => {
     if (e.key === 'Enter') doBodySearch();
   });
+
+  /* ════════════════════════════════
+     Scroll sync
+  ════════════════════════════════ */
+  let scrollSyncOn = false;
+  let isSyncing    = false;
+
+  function toggleScrollSync() {
+    scrollSyncOn = !scrollSyncOn;
+    const btn = $('sync-btn');
+    btn.classList.toggle('on', scrollSyncOn);
+    btn.querySelector('svg').style.opacity = scrollSyncOn ? '1' : '.6';
+  }
+
+  function makeSyncHandler(source, target) {
+    return () => {
+      if (!scrollSyncOn || isSyncing) return;
+      isSyncing = true;
+      const ratio = source.scrollTop / (source.scrollHeight - source.clientHeight || 1);
+      target.scrollTop = ratio * (target.scrollHeight - target.clientHeight);
+      isSyncing = false;
+    };
+  }
+
+  const gjBody = $('body-gj');
+  const jnBody = $('body-jn');
+  gjBody.addEventListener('scroll', makeSyncHandler(gjBody, jnBody));
+  jnBody.addEventListener('scroll', makeSyncHandler(jnBody, gjBody));
 
   function resetBodySearch() {
     $('body-keyword').value = '';
