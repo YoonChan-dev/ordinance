@@ -227,6 +227,103 @@
 
     .search-hint.error { color: var(--danger); }
 
+    /* ── Body search row ── */
+    .body-search-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+      align-items: center;
+    }
+
+    .body-search-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .body-search-field {
+      flex: 1;
+      position: relative;
+    }
+
+    .body-search-field svg {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 14px;
+      height: 14px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .body-search-input {
+      width: 100%;
+      padding: 8px 11px 8px 32px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--r-md);
+      background: var(--bg-surface);
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text-primary);
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    .body-search-input::placeholder { color: var(--text-muted); }
+
+    .body-search-input:focus {
+      outline: none;
+      border-color: var(--success);
+      box-shadow: 0 0 0 3px rgba(5, 150, 105, .1);
+    }
+
+    .body-search-btn {
+      padding: 8px 16px;
+      border: 1.5px solid var(--success);
+      border-radius: var(--r-md);
+      background: var(--bg-surface);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--success);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .2s, color .2s;
+    }
+
+    .body-search-btn:hover { background: var(--success); color: #fff; }
+    .body-search-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Body keyword highlight ── */
+    mark.body {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 0 2px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    /* ── Progress bar ── */
+    .progress-bar-wrap {
+      width: 100%;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--success);
+      border-radius: 2px;
+      transition: width .3s;
+    }
+
     /* ════════════════════════════════
        Filter bar
     ════════════════════════════════ */
@@ -625,6 +722,22 @@
         <button id="search-btn" class="search-btn" onclick="doSearch()">검색</button>
       </div>
       <div class="search-hint" id="search-hint"></div>
+      <div class="body-search-row">
+        <span class="body-search-label">본문 검색</span>
+        <div class="body-search-field">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+          </svg>
+          <input type="text" id="body-keyword" class="body-search-input"
+                 placeholder="조문 내 단어 검색 …"
+                 autocomplete="off" spellcheck="false">
+        </div>
+        <button id="body-search-btn" class="body-search-btn" onclick="doBodySearch()">본문 검색</button>
+      </div>
+      <div class="progress-bar-wrap" id="progress-wrap" style="display:none">
+        <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+      </div>
     </div>
   </div>
 
@@ -753,9 +866,10 @@
   /* ════════════════════════════════
      State
   ════════════════════════════════ */
-  let currentKeyword = '';
-  let allData        = null;   // { updated, gj: [...], jn: [...] }
-  const detailCache  = new Map();
+  let currentKeyword     = '';
+  let currentBodyKeyword = '';
+  let allData            = null;   // { updated, gj: [...], jn: [...] }
+  const detailCache      = new Map();
 
   /* ════════════════════════════════
      DOM
@@ -773,6 +887,12 @@
     if (!kw || !text) return text || '';
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
+  }
+
+  function highlightBody(text, kw) {
+    if (!kw || !text) return text || '';
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.replace(new RegExp(`(${escaped})`, 'gi'), '<mark class="body">$1</mark>');
   }
 
   /* ════════════════════════════════
@@ -1032,10 +1152,152 @@
   }
 
   /* ════════════════════════════════
+     Body search
+  ════════════════════════════════ */
+  async function doBodySearch() {
+    const keyword = $('body-keyword').value.trim();
+    const btn     = $('body-search-btn');
+    const hint    = $('search-hint');
+
+    if (!keyword) {
+      $('body-keyword').focus();
+      return;
+    }
+
+    if (!currentKeyword || !allData) {
+      hint.className   = 'search-hint error';
+      hint.textContent = '먼저 조례명 검색을 실행해 주세요.';
+      return;
+    }
+
+    currentBodyKeyword = keyword;
+
+    const lower  = currentKeyword.toLowerCase();
+    const gjOrg  = $('filter-gj').value;
+    const jnOrg  = $('filter-jn').value;
+    const match  = (item, orgFilter) =>
+      item.name.toLowerCase().includes(lower) && (!orgFilter || item.org === orgFilter);
+
+    const gjItems = allData.gj.filter(item => match(item, gjOrg));
+    const jnItems = allData.jn.filter(item => match(item, jnOrg));
+
+    const LIMIT = 50;
+    const total = Math.min(gjItems.length, LIMIT) + Math.min(jnItems.length, LIMIT);
+
+    btn.disabled    = true;
+    btn.textContent = '검색 중…';
+
+    const progressWrap = $('progress-wrap');
+    const progressBar  = $('progress-bar');
+    progressWrap.style.display = 'block';
+    progressBar.style.width    = '0%';
+
+    let done = 0;
+    function tick() {
+      done++;
+      progressBar.style.width = `${(done / total) * 100}%`;
+    }
+
+    async function fetchBatch(items) {
+      const slice   = items.slice(0, LIMIT);
+      const results = [];
+      const CONCUR  = 5;
+      for (let i = 0; i < slice.length; i += CONCUR) {
+        const chunk   = slice.slice(i, i + CONCUR);
+        const settled = await Promise.allSettled(
+          chunk.map(item =>
+            fetchDetail(item.id, item.mst)
+              .then(xml  => { tick(); return { item, xml  }; })
+              .catch(()  => { tick(); return { item, xml: null }; })
+          )
+        );
+        for (const r of settled) {
+          if (r.status === 'fulfilled') results.push(r.value);
+        }
+      }
+      return results;
+    }
+
+    const [gjFetched, jnFetched] = await Promise.all([
+      fetchBatch(gjItems),
+      fetchBatch(jnItems),
+    ]);
+
+    function filterByBody(fetched, kw) {
+      const kwLower = kw.toLowerCase();
+      return fetched
+        .filter(({ xml }) => xml)
+        .map(({ item, xml }) => {
+          const arts = parseArticles(xml).filter(a =>
+            (a.title   && a.title.toLowerCase().includes(kwLower)) ||
+            (a.content && a.content.toLowerCase().includes(kwLower))
+          );
+          return arts.length ? { item, arts } : null;
+        })
+        .filter(Boolean);
+    }
+
+    renderBodyResults('gj', filterByBody(gjFetched, keyword), gjItems.length > LIMIT);
+    renderBodyResults('jn', filterByBody(jnFetched, keyword), jnItems.length > LIMIT);
+
+    progressWrap.style.display = 'none';
+    progressBar.style.width    = '0%';
+    btn.disabled               = false;
+    btn.textContent            = '본문 검색';
+  }
+
+  function renderBodyResults(region, matched, truncated) {
+    const body  = $(`body-${region}`);
+    const count = $(`count-${region}`);
+
+    count.textContent = `${matched.length}건`;
+    count.classList.toggle('filled', matched.length > 0);
+
+    if (!matched.length) {
+      body.innerHTML = htmlEmpty(
+        '본문 검색 결과 없음',
+        `"${currentBodyKeyword}"이 포함된 조례가 없습니다.`
+      );
+      setStatus(region, '', `${region === 'gj' ? '광주광역시' : '전라남도'} 0건`);
+      return;
+    }
+
+    const warn = truncated
+      ? `<div style="padding:4px 8px 8px;font-size:11px;color:var(--warning)">
+           ※ 결과가 많아 상위 50건만 검색했습니다.
+         </div>`
+      : '';
+
+    body.innerHTML = warn + matched.map(({ item, arts }) => {
+      const artHtml = arts.map(a => `
+        <div class="article">
+          ${a.title ? `<div class="article-title">${highlightBody(a.title, currentBodyKeyword)}</div>` : ''}
+          <div class="article-body">${highlightBody(a.content, currentBodyKeyword)}</div>
+        </div>`).join('');
+
+      return `
+        <div class="card open">
+          <div class="card-head">
+            <div class="card-name">${highlight(item.name, currentKeyword)}</div>
+            <span class="card-badge">${item.type || '조례'}</span>
+          </div>
+          <div class="card-body" style="display:block">${artHtml}</div>
+        </div>`;
+    }).join('');
+
+    setStatus(region, 'ok',
+      `${region === 'gj' ? '광주광역시' : '전라남도'} ${matched.length}건 (본문)`);
+  }
+
+  /* ════════════════════════════════
      Keyboard & init
   ════════════════════════════════ */
   $('keyword').addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
+  });
+
+  $('body-keyword').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doBodySearch();
   });
 
   // 백그라운드에서 데이터 미리 로드 (첫 검색 속도 향상)
