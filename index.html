@@ -314,6 +314,52 @@
     .body-reset-btn:hover { border-color: var(--danger); color: var(--danger); }
     .body-reset-btn svg { width: 15px; height: 15px; }
 
+    /* ── Diff ── */
+    .diff-action-bar {
+      display: flex;
+      justify-content: flex-end;
+      padding: 2px 0 10px;
+    }
+
+    .diff-btn {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border: 1.5px solid var(--border-strong);
+      border-radius: var(--r-sm);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+
+    .diff-btn:hover  { border-color: var(--gj); color: var(--gj); }
+    .diff-btn.active { border-color: var(--gj); color: var(--gj); background: var(--gj-light); }
+
+    del.diff {
+      background: #fee2e2;
+      color: #b91c1c;
+      text-decoration: line-through;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    ins.diff {
+      background: #d1fae5;
+      color: #065f46;
+      text-decoration: none;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .article.diff-unique {
+      background: rgba(251, 191, 36, .1);
+      border-left: 3px solid #fbbf24;
+      padding-left: 8px;
+      margin-left: -8px;
+    }
+
     /* ── Body keyword highlight ── */
     mark.body {
       background: #d1fae5;
@@ -1089,6 +1135,7 @@
 
     body.innerHTML = items.map((item, i) => `
       <div class="card" id="card-${region}-${i}"
+           data-mst="${item.mst}" data-oid="${item.id}"
            onclick="toggleCard('${region}', ${i}, '${item.id}', '${item.mst}')">
         <div class="card-head">
           <div class="card-name">${highlight(item.name, currentKeyword)}</div>
@@ -1122,23 +1169,28 @@
     try {
       const xml      = await fetchDetail(ordinId, ordinMst);
       const articles = parseArticles(xml);
-
-      if (articles.length) {
-        body.innerHTML = articles.map(a => `
-          <div class="article">
-            ${a.title ? `<div class="article-title">${highlight(a.title, currentKeyword)}</div>` : ''}
-            <div class="article-body">${highlight(a.content, currentKeyword)}</div>
-          </div>`).join('');
-      } else {
-        body.innerHTML = `
-          <div style="padding: 10px 0; font-size: 12px; color: var(--text-muted)">
-            본문 내용을 불러올 수 없습니다.
-          </div>`;
-      }
+      body.innerHTML = renderArticlesHtml(articles, region, index);
       body.dataset.loaded = '1';
     } catch (err) {
       body.innerHTML = `<div class="state-error">본문 조회 실패: ${err.message}</div>`;
     }
+  }
+
+  function renderArticlesHtml(articles, region, index) {
+    const diffBar = `<div class="diff-action-bar">
+      <button class="diff-btn" onclick="event.stopPropagation();triggerDiff('${region}',${index})">Diff 비교</button>
+    </div>`;
+
+    if (!articles.length) return diffBar + `
+      <div style="padding:10px 0;font-size:12px;color:var(--text-muted)">
+        본문 내용을 불러올 수 없습니다.
+      </div>`;
+
+    return diffBar + articles.map(a => `
+      <div class="article">
+        ${a.title ? `<div class="article-title">${highlight(a.title, currentKeyword)}</div>` : ''}
+        <div class="article-body">${highlight(a.content, currentKeyword)}</div>
+      </div>`).join('');
   }
 
   /* ════════════════════════════════
@@ -1218,6 +1270,160 @@
   function applyFilter() {
     if (!currentKeyword || !allData) return;
     applyFilterWith(allData, currentKeyword);
+  }
+
+  /* ════════════════════════════════
+     Diff
+  ════════════════════════════════ */
+  function diffText(a, b) {
+    const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (a === b) return { a: esc(a), b: esc(b) };
+
+    // Tokenize: Korean words, numbers, Latin, whitespace, punctuation each as a token
+    const tok = s => (s||'').match(/[가-힣ㄱ-ㆎ]+|\d+|[a-zA-Z]+|[^가-힣ㄱ-ㆎ\da-zA-Z]+/g) || [];
+    const ta = tok(a), tb = tok(b);
+    const m = ta.length, n = tb.length;
+
+    // Block diff fallback for very long texts
+    if (m > 600 || n > 600) return { a: `<del class="diff">${esc(a)}</del>`, b: `<ins class="diff">${esc(b)}</ins>` };
+
+    // LCS DP (fill bottom-right → top-left for traceback)
+    const dp = Array.from({length: m+1}, () => new Uint16Array(n+1));
+    for (let i = m-1; i >= 0; i--)
+      for (let j = n-1; j >= 0; j--)
+        dp[i][j] = ta[i] === tb[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+
+    let i = 0, j = 0, ra = '', rb = '';
+    while (i < m || j < n) {
+      if (i < m && j < n && ta[i] === tb[j]) {
+        ra += esc(ta[i]); rb += esc(tb[j]); i++; j++;
+      } else if (j >= n || (i < m && dp[i+1][j] >= dp[i][j+1])) {
+        ra += `<del class="diff">${esc(ta[i])}</del>`; i++;
+      } else {
+        rb += `<ins class="diff">${esc(tb[j])}</ins>`; j++;
+      }
+    }
+    return { a: ra, b: rb };
+  }
+
+  function extractArticleNum(title) {
+    const m = (title || '').match(/제\s*(\d+)\s*조/);
+    return m ? parseInt(m[1]) : null;
+  }
+
+  function matchArticles(artsA, artsB) {
+    const numMap = new Map();
+    artsB.forEach((art, idx) => {
+      const n = extractArticleNum(art.title);
+      if (n !== null) numMap.set(n, idx);
+    });
+
+    const usedB = new Set();
+    const pairs = artsA.map(artA => {
+      const n = extractArticleNum(artA.title);
+      if (n !== null && numMap.has(n)) {
+        const idx = numMap.get(n);
+        usedB.add(idx);
+        return { a: artA, b: artsB[idx] };
+      }
+      return { a: artA, b: null };
+    });
+
+    artsB.forEach((artB, idx) => {
+      if (!usedB.has(idx)) pairs.push({ a: null, b: artB });
+    });
+
+    return pairs;
+  }
+
+  function triggerDiff(region, index) {
+    const card   = $(`card-${region}-${index}`);
+    const bodyEl = $(`card-body-${region}-${index}`);
+    const btn    = card.querySelector('.diff-btn');
+
+    // Toggle off
+    if (card.dataset.diffMode === '1') {
+      const otherRegion = region === 'gj' ? 'jn' : 'gj';
+      const otherIdx    = card.dataset.diffOther;
+
+      card.dataset.diffMode = '';
+      btn.textContent = 'Diff 비교';
+      btn.classList.remove('active');
+
+      const cacheKey = card.dataset.mst || card.dataset.oid;
+      const xml = detailCache.get(cacheKey);
+      if (xml) bodyEl.innerHTML = renderArticlesHtml(parseArticles(xml), region, index);
+
+      if (otherIdx !== undefined) {
+        const otherCard   = $(`card-${otherRegion}-${otherIdx}`);
+        const otherBodyEl = $(`card-body-${otherRegion}-${otherIdx}`);
+        if (otherCard) {
+          otherCard.dataset.diffMode = '';
+          const ob = otherCard.querySelector('.diff-btn');
+          if (ob) { ob.textContent = 'Diff 비교'; ob.classList.remove('active'); }
+          const oxKey = otherCard.dataset.mst || otherCard.dataset.oid;
+          const oxm = detailCache.get(oxKey);
+          if (oxm && otherBodyEl) otherBodyEl.innerHTML = renderArticlesHtml(parseArticles(oxm), otherRegion, parseInt(otherIdx));
+        }
+      }
+      return;
+    }
+
+    // Find open+loaded card on other side
+    const otherRegion  = region === 'gj' ? 'jn' : 'gj';
+    const otherCard    = document.querySelector(`#body-${otherRegion} .card.open`);
+    if (!otherCard) {
+      btn.textContent = '반대쪽 먼저 열어주세요';
+      setTimeout(() => { btn.textContent = 'Diff 비교'; }, 2000);
+      return;
+    }
+
+    const otherIndex  = parseInt(otherCard.id.split('-').pop());
+    const otherBodyEl = $(`card-body-${otherRegion}-${otherIndex}`);
+    if (!otherBodyEl || !otherBodyEl.dataset.loaded) {
+      btn.textContent = '잠시 후 다시 시도';
+      setTimeout(() => { btn.textContent = 'Diff 비교'; }, 2000);
+      return;
+    }
+
+    const xmlThis  = detailCache.get(card.dataset.mst    || card.dataset.oid);
+    const xmlOther = detailCache.get(otherCard.dataset.mst || otherCard.dataset.oid);
+    if (!xmlThis || !xmlOther) return;
+
+    const artsThis  = parseArticles(xmlThis);
+    const artsOther = parseArticles(xmlOther);
+    const pairs     = matchArticles(artsThis, artsOther);
+
+    const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let htmlThis = '', htmlOther = '';
+
+    const diffBar = (r, i) => `<div class="diff-action-bar">
+      <button class="diff-btn active" onclick="event.stopPropagation();triggerDiff('${r}',${i})">Diff 해제</button>
+    </div>`;
+
+    htmlThis  = diffBar(region, index);
+    htmlOther = diffBar(otherRegion, otherIndex);
+
+    for (const { a, b } of pairs) {
+      if (a && b) {
+        const dt = diffText(a.title || '', b.title || '');
+        const dc = diffText(a.content, b.content);
+        htmlThis  += `<div class="article">${a.title ? `<div class="article-title">${dt.a}</div>` : ''}<div class="article-body">${dc.a}</div></div>`;
+        htmlOther += `<div class="article">${b.title ? `<div class="article-title">${dt.b}</div>` : ''}<div class="article-body">${dc.b}</div></div>`;
+      } else if (a) {
+        htmlThis  += `<div class="article diff-unique">${a.title ? `<div class="article-title">${esc(a.title)}</div>` : ''}<div class="article-body">${esc(a.content)}</div></div>`;
+      } else {
+        htmlOther += `<div class="article diff-unique">${b.title ? `<div class="article-title">${esc(b.title)}</div>` : ''}<div class="article-body">${esc(b.content)}</div></div>`;
+      }
+    }
+
+    bodyEl.innerHTML      = htmlThis;
+    otherBodyEl.innerHTML = htmlOther;
+
+    card.dataset.diffMode      = '1';
+    card.dataset.diffOther     = otherIndex;
+    otherCard.dataset.diffMode = '1';
+    otherCard.dataset.diffOther = index;
   }
 
   /* ════════════════════════════════
