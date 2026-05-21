@@ -705,9 +705,17 @@
     if (mst) params.MST = mst;
     else      params.ID  = id;
 
-    const xml = await apiFetch(API_DETAIL, params);
-    detailCache.set(key, xml);
-    return xml;
+    // Vercel 콜드 스타트 대비: 실패 시 1.5초 후 1회 자동 재시도
+    try {
+      const xml = await apiFetch(API_DETAIL, params);
+      detailCache.set(key, xml);
+      return xml;
+    } catch {
+      await new Promise(r => setTimeout(r, 1500));
+      const xml = await apiFetch(API_DETAIL, params);
+      detailCache.set(key, xml);
+      return xml;
+    }
   }
 
   /* ════════════════════════════════
