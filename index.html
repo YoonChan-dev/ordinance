@@ -715,20 +715,20 @@
   ════════════════════════════════ */
   function parseArticles(xml) {
     const articles = [];
+    const get = (node, tag) => node.getElementsByTagName(tag)[0]?.textContent?.trim() || '';
 
     // 법제처 자치법규 XML: <조문> → <조> → <조제목>, <조내용>
-    xml.querySelectorAll('조').forEach(node => {
-      const title   = node.querySelector('조제목')?.textContent?.trim() || '';
-      const content = node.querySelector('조내용')?.textContent?.trim() || '';
-      if (content) articles.push({ title, content });
+    // getElementsByTagName이 한글 태그명에 더 안정적
+    Array.from(xml.getElementsByTagName('조')).forEach(node => {
+      const content = get(node, '조내용');
+      if (content) articles.push({ title: get(node, '조제목'), content });
     });
 
-    // 일부 조례 구형 구조 fallback
+    // 구형 구조 fallback
     if (!articles.length) {
-      xml.querySelectorAll('조문단위').forEach(node => {
-        const title   = node.querySelector('조문제목')?.textContent?.trim() || '';
-        const content = node.querySelector('조문내용')?.textContent?.trim() || '';
-        if (content) articles.push({ title, content });
+      Array.from(xml.getElementsByTagName('조문단위')).forEach(node => {
+        const content = get(node, '조문내용');
+        if (content) articles.push({ title: get(node, '조문제목'), content });
       });
     }
 
